@@ -1,0 +1,93 @@
+# =============================================================================
+# DB Cleanup Policies Configuration
+# =============================================================================
+# Each policy defines:
+#   id              - unique identifier
+#   name            - human-readable display name
+#   description     - what this policy does
+#   databaseType    - target database engine (currently: MONGODB)
+#   collectionName  - MongoDB collection to clean up
+#   maxDeletionLimit- safety cap on documents deleted per execution
+#   agePeriodDays   - delete documents older than this many days
+#   targetField     - document field containing the reference date/timestamp
+#   conditions      - additional field-level filters (ANDed with age filter)
+#   enabled         - whether the policy can be executed
+# =============================================================================
+
+cleanup:
+  policies:
+
+    # -------------------------------------------------------------------------
+    # Policy 1: Clean up old completed orders
+    # Deletes orders that are COMPLETED and older than 30 days.
+    # Up to 1000 documents removed per execution.
+    # -------------------------------------------------------------------------
+    - id: policy-orders-cleanup
+      name: "Old Completed Orders Cleanup"
+      description: >
+        Removes completed purchase orders that are older than 30 days.
+        Pending or cancelled orders are not affected.
+      databaseType: MONGODB
+      collectionName: orders
+      maxDeletionLimit: 1000
+      agePeriodDays: 30
+      targetField: createdAt
+      enabled: true
+      conditions:
+        - field: status
+          operator: EQ
+          value: COMPLETED
+
+    # -------------------------------------------------------------------------
+    # Policy 2: Remove inactive user accounts
+    # Deletes users with active=false who haven't logged in for 90+ days.
+    # Up to 500 documents removed per execution.
+    # -------------------------------------------------------------------------
+    - id: policy-inactive-users
+      name: "Inactive User Accounts Cleanup"
+      description: >
+        Removes user accounts that have been marked inactive and have not
+        logged in for more than 90 days.
+      databaseType: MONGODB
+      collectionName: users
+      maxDeletionLimit: 500
+      agePeriodDays: 90
+      targetField: lastLoginAt
+      enabled: true
+      conditions:
+        - field: active
+          operator: EQ
+          value: false
+
+    # -------------------------------------------------------------------------
+    # Policy 3: Purge expired sessions
+    # Deletes browser/API sessions whose expiresAt timestamp is 7+ days old.
+    # High limit (5000) since session records are small and numerous.
+    # -------------------------------------------------------------------------
+    - id: policy-expired-sessions
+      name: "Expired Sessions Purge"
+      description: >
+        Purges session records that expired more than 7 days ago.
+        Active sessions are not affected.
+      databaseType: MONGODB
+      collectionName: sessions
+      maxDeletionLimit: 5000
+      agePeriodDays: 7
+      targetField: expiresAt
+      enabled: true
+
+    # -------------------------------------------------------------------------
+    # Policy 4: Archive old audit logs (disabled by default)
+    # Example of a disabled policy - will show as DISABLED in the dashboard.
+    # -------------------------------------------------------------------------
+    - id: policy-audit-logs
+      name: "Old Audit Logs Cleanup"
+      description: >
+        Removes audit log entries older than 180 days.
+        Disabled by default - enable when ready for production use.
+      databaseType: MONGODB
+      collectionName: audit_logs
+      maxDeletionLimit: 2000
+      agePeriodDays: 180
+      targetField: timestamp
+      enabled: false

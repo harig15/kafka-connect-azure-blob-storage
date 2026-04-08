@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>DB Cleanup Dashboard</title>
+
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+          rel="stylesheet"
+          integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN"
+          crossorigin="anonymous"/>
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+          rel="stylesheet"/>
+
+    <style>
+        :root {
+            --brand: #1a6faf;
+            --brand-light: #e8f2fb;
+        }
+
+        body {
+            background: #f4f7fb;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+        }
+
+        /* ── Navbar ────────────────────────────────────────────── */
+        .navbar {
+            background: var(--brand) !important;
+        }
+
+        /* ── Stat cards ─────────────────────────────────────────── */
+        .stat-card {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,.08);
+        }
+        .stat-card .stat-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4rem;
+        }
+        .stat-card .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+        }
+        .stat-card .stat-label {
+            font-size: .8rem;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: .05em;
+        }
+
+        /* ── Policy cards ───────────────────────────────────────── */
+        .policy-card {
+            border: 1px solid #dee2e6;
+            border-radius: 12px;
+            transition: box-shadow .2s;
+        }
+        .policy-card:hover {
+            box-shadow: 0 4px 14px rgba(0,0,0,.1);
+        }
+        .policy-card.disabled-policy {
+            opacity: .65;
+        }
+        .badge-db {
+            background: var(--brand-light);
+            color: var(--brand);
+            font-size: .72rem;
+            font-weight: 600;
+            padding: 4px 8px;
+            border-radius: 6px;
+        }
+
+        /* ── Execution table ────────────────────────────────────── */
+        .executions-table td, .executions-table th {
+            vertical-align: middle;
+        }
+
+        /* ── Status badges ──────────────────────────────────────── */
+        .badge-status-RUNNING  { background: #0d6efd; }
+        .badge-status-SUCCESS  { background: #198754; }
+        .badge-status-FAILED   { background: #dc3545; }
+        .badge-status-SKIPPED  { background: #6c757d; }
+
+        /* ── Toast ──────────────────────────────────────────────── */
+        #toast-container {
+            position: fixed;
+            top: 70px;
+            right: 20px;
+            z-index: 1100;
+        }
+
+        /* ── Refresh indicator ──────────────────────────────────── */
+        #refresh-indicator {
+            font-size: .75rem;
+            color: #6c757d;
+        }
+
+        /* ── Spinner in button ──────────────────────────────────── */
+        .btn-execute .spinner-border {
+            display: none;
+            width: 0.85rem;
+            height: 0.85rem;
+            border-width: 2px;
+        }
+        .btn-execute.loading .spinner-border { display: inline-block; }
+        .btn-execute.loading .btn-icon       { display: none; }
+    </style>
+</head>
+<body>
+
+<!-- ═══════════════════ Navbar ═══════════════════════════════════════════════ -->
+<nav class="navbar navbar-dark py-2 px-4 mb-4">
+    <span class="navbar-brand fw-bold fs-5">
+        <i class="bi bi-database-fill-gear me-2"></i>DB Cleanup Dashboard
+    </span>
+    <div id="refresh-indicator" class="text-white-50 small">
+        <i class="bi bi-arrow-clockwise me-1"></i>Auto-refreshes every 4 s
+    </div>
+</nav>
+
+<!-- ═══════════════════ Toast container ═══════════════════════════════════ -->
+<div id="toast-container"></div>
+
+<div class="container-xxl pb-5">
+
+    <!-- ─── Stats row ──────────────────────────────────────────────────────── -->
+    <div class="row g-3 mb-4" id="stats-row">
+        <!-- filled by JS -->
+    </div>
+
+    <!-- ─── Policies ──────────────────────────────────────────────────────── -->
+    <h5 class="fw-semibold mb-3"><i class="bi bi-list-check me-2 text-primary"></i>Cleanup Policies</h5>
+    <div class="row g-3 mb-5" id="policies-row">
+        <div class="col-12 text-center text-muted py-4">
+            <div class="spinner-border spinner-border-sm me-2"></div>Loading policies…
+        </div>
+    </div>
+
+    <!-- ─── Execution History ──────────────────────────────────────────────── -->
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h5 class="fw-semibold mb-0">
+            <i class="bi bi-clock-history me-2 text-primary"></i>Execution History
+            <span id="running-badge" class="badge bg-primary ms-2" style="display:none">
+                <span class="spinner-border spinner-border-sm me-1" style="width:.6rem;height:.6rem;border-width:2px"></span>
+                Running
+            </span>
+        </h5>
+        <button class="btn btn-sm btn-outline-secondary" onclick="loadAll()">
+            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+        </button>
+    </div>
+
+    <div class="card border-0 shadow-sm" style="border-radius:12px;overflow:hidden">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 executions-table">
+                <thead class="table-light">
+                <tr>
+                    <th>Policy</th>
+                    <th>Collection</th>
+                    <th>Status</th>
+                    <th class="text-end">Matched</th>
+                    <th class="text-end">Deleted</th>
+                    <th>Started</th>
+                    <th>Duration</th>
+                    <th>Error</th>
+                </tr>
+                </thead>
+                <tbody id="executions-tbody">
+                <tr>
+                    <td colspan="8" class="text-center text-muted py-4">
+                        <div class="spinner-border spinner-border-sm me-2"></div>Loading…
+                    </td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div><!-- /container -->
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL"
+        crossorigin="anonymous"></script>
+
+<script>
+    // ──────────────────────────────────────────────────────────────────────────
+    // State
+    // ──────────────────────────────────────────────────────────────────────────
+    let policies      = [];
+    let executions    = [];
+    let stats         = {};
+    let pollingActive = false;
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Boot
+    // ──────────────────────────────────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', () => {
+        loadAll();
+        setInterval(loadAll, 4000);
+    });
+
+    async function loadAll() {
+        await Promise.all([loadPolicies(), loadExecutions(), loadStats()]);
+        renderStats();
+        renderPolicies();
+        renderExecutions();
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Data fetching
+    // ──────────────────────────────────────────────────────────────────────────
+    async function loadPolicies() {
+        try {
+            const r = await fetch('/api/policies');
+            policies = await r.json();
+        } catch (e) { console.error('Failed to load policies', e); }
+    }
+
+    async function loadExecutions() {
+        try {
+            const r = await fetch('/api/executions');
+            executions = await r.json();
+        } catch (e) { console.error('Failed to load executions', e); }
+    }
+
+    async function loadStats() {
+        try {
+            const r = await fetch('/api/stats');
+            stats = await r.json();
+        } catch (e) { console.error('Failed to load stats', e); }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Render: Stat cards
+    // ──────────────────────────────────────────────────────────────────────────
+    function renderStats() {
+        const cards = [
+            { label: 'Total Policies',    value: stats.totalPolicies    ?? '-', icon: 'bi-file-earmark-text',  bg: '#e8f2fb', color: '#1a6faf' },
+            { label: 'Enabled Policies',  value: stats.enabledPolicies  ?? '-', icon: 'bi-check-circle',        bg: '#e6f9f0', color: '#198754' },
+            { label: 'Total Executions',  value: stats.totalExecutions  ?? '-', icon: 'bi-play-circle',         bg: '#fff3cd', color: '#856404' },
+            { label: 'Docs Deleted',      value: (stats.totalDocumentsDeleted ?? '-').toLocaleString(), icon: 'bi-trash3', bg: '#fde8e8', color: '#dc3545' },
+        ];
+
+        document.getElementById('stats-row').innerHTML = cards.map(c => `
+            <div class="col-6 col-md-3">
+                <div class="card stat-card p-3">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="stat-icon" style="background:${c.bg};color:${c.color}">
+                            <i class="bi ${c.icon}"></i>
+                        </div>
+                        <div>
+                            <div class="stat-value">${c.value}</div>
+                            <div class="stat-label">${c.label}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Render: Policy cards
+    // ──────────────────────────────────────────────────────────────────────────
+    function renderPolicies() {
+        if (!policies.length) {
+            document.getElementById('policies-row').innerHTML =
+                '<div class="col-12 text-center text-muted py-4">No policies configured.</div>';
+            return;
+        }
+
+        document.getElementById('policies-row').innerHTML = policies.map(p => {
+            const lastExec = executions.find(e => e.policyId === p.id);
+            const lastStatus = lastExec ? statusBadge(lastExec.status) : '<span class="text-muted small">Never run</span>';
+
+            return `
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="card policy-card h-100 ${!p.enabled ? 'disabled-policy' : ''}">
+                    <div class="card-body d-flex flex-column gap-2 p-4">
+                        <div class="d-flex align-items-start justify-content-between gap-2">
+                            <div>
+                                <div class="fw-semibold">${escHtml(p.name)}</div>
+                                <span class="badge-db mt-1 d-inline-block">
+                                    <i class="bi bi-database me-1"></i>${escHtml(p.databaseType)} &bull; ${escHtml(p.collectionName)}
+                                </span>
+                            </div>
+                            ${p.enabled
+                                ? '<span class="badge bg-success-subtle text-success border border-success-subtle">Enabled</span>'
+                                : '<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">Disabled</span>'}
+                        </div>
+
+                        <p class="text-muted small mb-0" style="flex:1">${escHtml(p.description || '')}</p>
+
+                        <ul class="list-unstyled small text-muted mb-0">
+                            <li><i class="bi bi-calendar-x me-1"></i>Age threshold: <strong>${p.agePeriodDays} days</strong></li>
+                            <li><i class="bi bi-shield-check me-1"></i>Max deletion: <strong>${p.maxDeletionLimit.toLocaleString()} docs</strong></li>
+                            <li><i class="bi bi-funnel me-1"></i>Target field: <code>${escHtml(p.targetField)}</code></li>
+                            ${(p.conditions||[]).length
+                                ? `<li><i class="bi bi-filter me-1"></i>${p.conditions.length} extra condition(s)</li>`
+                                : ''}
+                        </ul>
+
+                        <div class="d-flex align-items-center justify-content-between mt-1">
+                            <div class="small">Last: ${lastStatus}</div>
+                            <button class="btn btn-sm btn-primary btn-execute"
+                                    id="btn-${escHtml(p.id)}"
+                                    onclick="executePolicy('${escHtml(p.id)}')"
+                                    ${!p.enabled ? 'disabled' : ''}>
+                                <span class="spinner-border me-1"></span>
+                                <i class="bi bi-play-fill btn-icon me-1"></i>Execute
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Render: Execution history table
+    // ──────────────────────────────────────────────────────────────────────────
+    function renderExecutions() {
+        const tbody = document.getElementById('executions-tbody');
+        const runningBadge = document.getElementById('running-badge');
+        const hasRunning = executions.some(e => e.status === 'RUNNING');
+
+        runningBadge.style.display = hasRunning ? '' : 'none';
+
+        if (!executions.length) {
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted py-4">
+                <i class="bi bi-inbox me-2"></i>No executions yet. Click <strong>Execute</strong> on a policy to start.
+            </td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = executions.map(e => `
+            <tr class="${e.status === 'RUNNING' ? 'table-primary' : ''}">
+                <td class="fw-medium">${escHtml(e.policyName)}</td>
+                <td><code>${escHtml(e.collectionName)}</code></td>
+                <td>${statusBadge(e.status)}</td>
+                <td class="text-end">${e.documentsMatched !== undefined ? e.documentsMatched.toLocaleString() : '—'}</td>
+                <td class="text-end fw-semibold ${e.documentsDeleted > 0 ? 'text-danger' : ''}">${e.documentsDeleted.toLocaleString()}</td>
+                <td class="text-nowrap small">${fmtInstant(e.startTime)}</td>
+                <td class="small">${e.endTime ? fmtDuration(e.startTime, e.endTime) : '<span class="text-primary">…</span>'}</td>
+                <td class="small text-danger">${escHtml(e.errorMessage || '')}</td>
+            </tr>
+        `).join('');
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Execute policy
+    // ──────────────────────────────────────────────────────────────────────────
+    async function executePolicy(policyId) {
+        const btn = document.getElementById('btn-' + policyId);
+        if (btn) { btn.disabled = true; btn.classList.add('loading'); }
+
+        try {
+            const resp = await fetch(`/api/policies/${policyId}/execute`, { method: 'POST' });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const record = await resp.json();
+            showToast('success', `Policy triggered — execution ID: ${record.id}`);
+            await loadAll();
+        } catch (err) {
+            showToast('danger', `Failed to execute: ${err.message}`);
+        } finally {
+            if (btn) { btn.classList.remove('loading'); btn.disabled = false; }
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Helpers
+    // ──────────────────────────────────────────────────────────────────────────
+    function statusBadge(status) {
+        const icons = { RUNNING: 'bi-arrow-repeat', SUCCESS: 'bi-check-lg', FAILED: 'bi-x-lg', SKIPPED: 'bi-dash-lg' };
+        const icon = icons[status] || 'bi-question';
+        const spin = status === 'RUNNING' ? 'spin' : '';
+        return `<span class="badge badge-status-${status} text-white">
+            <i class="bi ${icon} ${spin} me-1" style="${status==='RUNNING'?'animation:spin 1s linear infinite':''}"></i>${status}
+        </span>`;
+    }
+
+    function fmtInstant(iso) {
+        if (!iso) return '—';
+        const d = new Date(iso);
+        return d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'medium' });
+    }
+
+    function fmtDuration(startIso, endIso) {
+        if (!startIso || !endIso) return '—';
+        const ms = new Date(endIso) - new Date(startIso);
+        if (ms < 1000) return `${ms} ms`;
+        return `${(ms / 1000).toFixed(1)} s`;
+    }
+
+    function escHtml(str) {
+        if (str == null) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Toast notifications
+    // ──────────────────────────────────────────────────────────────────────────
+    function showToast(type, message) {
+        const id = 'toast-' + Date.now();
+        const html = `
+            <div id="${id}" class="toast align-items-center text-bg-${type} border-0 mb-2 show" role="alert">
+                <div class="d-flex">
+                    <div class="toast-body">${escHtml(message)}</div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto"
+                            onclick="document.getElementById('${id}').remove()"></button>
+                </div>
+            </div>`;
+        document.getElementById('toast-container').insertAdjacentHTML('beforeend', html);
+        setTimeout(() => { const el = document.getElementById(id); if (el) el.remove(); }, 5000);
+    }
+</script>
+
+<!-- Spinning animation for RUNNING icon -->
+<style>
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+</style>
+</body>
+</html>

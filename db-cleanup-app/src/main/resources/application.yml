@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: db-cleanup-app
+
+  # Embedded MongoDB configuration (no external server needed for PoC)
+  data:
+    mongodb:
+      database: cleanup_poc_db
+
+  # Thymeleaf template settings
+  thymeleaf:
+    cache: false
+    encoding: UTF-8
+    mode: HTML
+
+  # Load additional config files (policies.yml)
+  config:
+    import: classpath:policies.yml
+
+server:
+  port: 8080
+
+logging:
+  level:
+    com.dbcleanup: DEBUG
+    org.springframework.data.mongodb: INFO

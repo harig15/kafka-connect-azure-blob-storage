@@ -73,7 +73,22 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   | `policy-audit-logs` | Old Audit Logs Cleanup | `audit_logs` | 180 d | 2 000 | **Disabled** |
 
 #### Infrastructure
-- `pom.xml` — Spring Boot 3.2.4 parent; dependencies: `spring-boot-starter-web`, `spring-boot-starter-data-mongodb`, `spring-boot-starter-thymeleaf`, `de.flapdoodle.embed.mongo.spring30x:4.13.1` (embedded MongoDB), Lombok, Spring Boot Maven Plugin.
+- `pom.xml` — Spring Boot 3.2.4 parent; dependencies: `spring-boot-starter-web`, `spring-boot-starter-data-mongodb`, `spring-boot-starter-thymeleaf`, `de.flapdoodle.embed.mongo.spring30x` (embedded MongoDB), Lombok, Spring Boot Maven Plugin.
+
+#### Contract Testing
+- `spring-cloud-contract-maven-plugin` 4.1.4 wired into the standard lifecycle:
+  - `generate-test-sources` → `generateTests` compiles every contract into a JUnit 5 test.
+  - `package` → `generateStubs` publishes `db-cleanup-app-<version>-stubs.jar` containing WireMock mappings for consumers.
+- `spring-cloud-starter-contract-verifier` added in `test` scope.
+- 10 contracts under `src/test/resources/contracts`, grouped into `policies/`, `executions/`, and `stats/`, covering all six REST endpoints plus the three 404 paths.
+- `CleanupApiBase` — shared base class for the generated tests. Uses `@WebMvcTest` so the contracts exercise the real controller and the real Jackson configuration while MongoDB, the embedded Mongo server, and the data seeder stay out of the context. The suite needs no database.
+- `build-helper-maven-plugin` registers `target/generated-test-sources/contracts` unconditionally. Without it, an incremental build where contracts are unchanged skips generation, clears `target/test-classes`, and passes while running zero contract tests.
+- Surefire `failIfNoTests=true` so that failure mode fails the build instead of reporting a false green.
+
+### Fixed
+
+- **Module did not resolve.** `de.flapdoodle.embed.mongo.spring30x` was pinned to `4.13.1`, a version never published to Maven Central. Corrected to `4.11.0`.
+- **Module did not compile.** `CleanupService` passed `limitedQuery.fields().include("_id")` to `MongoTemplate.find`, but `fields()` returns a `Field`, not a `Query`. The projection is now applied as a statement and the query is passed instead.
 
 ---
 

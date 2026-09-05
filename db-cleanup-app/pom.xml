@@ -20,6 +20,8 @@
 
     <properties>
         <java.version>17</java.version>
+        <!-- Spring Cloud Contract 4.1.x is the release line compatible with Spring Boot 3.2.x -->
+        <spring-cloud-contract.version>4.1.4</spring-cloud-contract.version>
     </properties>
 
     <dependencies>
@@ -45,7 +47,7 @@
         <dependency>
             <groupId>de.flapdoodle.embed</groupId>
             <artifactId>de.flapdoodle.embed.mongo.spring30x</artifactId>
-            <version>4.13.1</version>
+            <version>4.11.0</version>
         </dependency>
 
         <!-- Configuration properties support -->
@@ -68,6 +70,18 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!--
+            Consumer-driven contract testing (producer side).
+            Brings in the contract verifier runtime plus REST Assured MockMvc,
+            which the generated contract tests are written against.
+        -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-contract-verifier</artifactId>
+            <version>${spring-cloud-contract.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -82,6 +96,79 @@
                             <artifactId>lombok</artifactId>
                         </exclude>
                     </excludes>
+                </configuration>
+            </plugin>
+
+            <!--
+                Spring Cloud Contract - producer side.
+
+                Wires two goals into the standard lifecycle:
+                  generate-test-sources : generateTests  - turns every contract under
+                                                           src/test/resources/contracts into a
+                                                           JUnit 5 test that calls the real
+                                                           controller through MockMvc.
+                  package               : generateStubs  - packages the same contracts as
+                                                           WireMock stub mappings into
+                                                           db-cleanup-app-<version>-stubs.jar,
+                                                           which consumers use to stand up a
+                                                           fake of this API.
+
+                The generated tests run in the normal `mvn test` phase via Surefire, so a
+                change that breaks the published API fails the build.
+            -->
+            <plugin>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-contract-maven-plugin</artifactId>
+                <version>${spring-cloud-contract.version}</version>
+                <extensions>true</extensions>
+                <configuration>
+                    <testFramework>JUNIT5</testFramework>
+                    <testMode>MOCKMVC</testMode>
+                    <baseClassForTests>com.dbcleanup.contract.CleanupApiBase</baseClassForTests>
+                    <basePackageForTests>com.dbcleanup.contract.generated</basePackageForTests>
+                </configuration>
+            </plugin>
+
+            <!--
+                Keeps the generated contract tests in the test compilation unit.
+
+                When the contracts have not changed, spring-cloud-contract skips generation
+                ("Nothing to generate - all classes are up to date") and, in doing so, does not
+                register target/generated-test-sources/contracts as a test source root. The
+                compiler then rebuilds from src/test/java alone, clears target/test-classes, and
+                Surefire finds no contract tests at all - a green build that verified nothing.
+                Registering the directory unconditionally makes incremental builds behave like
+                clean ones.
+            -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>add-contract-test-sources</id>
+                        <phase>generate-test-sources</phase>
+                        <goals>
+                            <goal>add-test-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>${project.build.directory}/generated-test-sources/contracts</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
+                Second line of defence for the same failure mode: if the contract tests ever
+                stop being discovered, fail the build instead of reporting success.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <failIfNoTests>true</failIfNoTests>
                 </configuration>
             </plugin>
         </plugins>

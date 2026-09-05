@@ -741,3 +741,98 @@ public void runOrdersCleanup() { ... }
 - Add `dryRun` query param to `POST /api/policies/{id}/execute?dryRun=true`.
 - `CleanupService` skips the delete loop; sets `status = DRY_RUN`, `documentsDeleted = 0`.
 - Dashboard shows matched count without actual deletion.
+
+---
+
+## 16. Contract Testing
+
+The REST API has two consumers: the Thymeleaf dashboard (which reads the JSON
+directly in the browser) and any future scheduler or external client. Consumer-driven
+contract testing pins the wire format so a refactor cannot silently change it.
+
+### 16.1 Approach
+
+Spring Cloud Contract runs on the **producer side**. Contracts are the source of truth
+and drive two artefacts from a single definition:
+
+| Artefact | Consumer | Produced by |
+|----------|----------|-------------|
+| JUnit 5 verification tests | this build | `generateTests` goal |
+| WireMock stub mappings (`*-stubs.jar`) | downstream consumers | `generateStubs` goal |
+
+Because both come from the same contract, a stub can never drift from the behaviour
+the producer actually verifies.
+
+### 16.2 Build Wiring
+
+| Phase | Plugin | Goal | Effect |
+|-------|--------|------|--------|
+| `generate-test-sources` | spring-cloud-contract | `generateTests` | Contracts to JUnit 5 sources under `target/generated-test-sources/contracts` |
+| `generate-test-sources` | build-helper | `add-test-source` | Registers that directory for compilation |
+| `test` | surefire | `test` | Runs the generated tests, `failIfNoTests=true` |
+| `package` | spring-cloud-contract | `generateStubs` | Builds `db-cleanup-app-<version>-stubs.jar` |
+
+The `build-helper` step is not optional. When contracts are unchanged, the contract
+plugin skips generation and does not register its output directory. The compiler then
+rebuilds from `src/test/java` alone, clears `target/test-classes`, and Surefire
+discovers no contract tests, so an incremental build passes while verifying nothing.
+Registering the directory unconditionally removes that failure mode, and
+`failIfNoTests` turns any recurrence into a build failure rather than a false green.
+
+### 16.3 Test Topology
+
+```
+src/test/resources/contracts/
+├── policies/     → com.dbcleanup.contract.generated.PoliciesTest    (6 contracts)
+├── executions/   → com.dbcleanup.contract.generated.ExecutionsTest  (3 contracts)
+└── stats/        → com.dbcleanup.contract.generated.StatsTest       (1 contract)
+```
+
+Every generated test extends `com.dbcleanup.contract.CleanupApiBase`, annotated
+`@WebMvcTest(controllers = CleanupController.class)`. That slice loads the real request
+mappings and the real Jackson auto-configuration, so `Instant` fields are asserted
+exactly as production serialises them, while MongoDB, the embedded Mongo server, and
+the data seeder stay out of the context. `PolicyConfig`, `CleanupService`, and
+`ExecutionRecordRepository` are `@MockBean`s returning fixed fixtures. The suite needs
+no database and completes in roughly four seconds.
+
+### 16.4 Coverage
+
+| Contract | Endpoint | Pins |
+|----------|----------|------|
+| `shouldReturnAllConfiguredPolicies` | `GET /api/policies` | Catalogue lists disabled policies too |
+| `shouldReturnASinglePolicyById` | `GET /api/policies/{id}` | Full policy payload |
+| `shouldReturnAPolicyWithoutConditions` | `GET /api/policies/{id}` | `conditions` is `[]`, never null |
+| `shouldReturnNotFoundForUnknownPolicy` | `GET /api/policies/{id}` | 404, not an error body |
+| `shouldAcceptAnOnDemandExecution` | `POST /api/policies/{id}/execute` | 202 Accepted plus the RUNNING record |
+| `shouldRejectExecutionOfUnknownPolicy` | `POST /api/policies/{id}/execute` | 404, no execution started |
+| `shouldReturnRecentExecutions` | `GET /api/executions` | History row shape including `durationMs` |
+| `shouldReturnASingleExecutionById` | `GET /api/executions/{id}` | Finished record payload |
+| `shouldReturnNotFoundForUnknownExecution` | `GET /api/executions/{id}` | 404 |
+| `shouldReturnDashboardStatistics` | `GET /api/stats` | The seven counter key names |
+
+### 16.5 Known DSL Constraint
+
+Spring Cloud Contract collapses assertions on a nested array to a single
+`$[*].['conditions'][*]` path. A catalogue response holding one policy with conditions
+and one without therefore cannot be expressed in one contract. The empty-array shape is
+pinned on the single-policy endpoint instead, where no collapsing occurs.
+
+### 16.6 Consuming the Stubs
+
+```xml
+<dependency>
+    <groupId>com.dbcleanup</groupId>
+    <artifactId>db-cleanup-app</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <classifier>stubs</classifier>
+    <scope>test</scope>
+</dependency>
+```
+
+```java
+@AutoConfigureStubRunner(
+        ids = "com.dbcleanup:db-cleanup-app:+:stubs:8090",
+        stubsMode = StubRunnerProperties.StubsMode.LOCAL)
+class SomeConsumerTest { }
+```

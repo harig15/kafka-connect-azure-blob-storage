@@ -92,9 +92,12 @@ public class CleanupService {
             Query limitedQuery = buildQuery(policy);
             limitedQuery.limit(policy.getMaxDeletionLimit());
 
+            // Project only _id; fields() mutates the query and returns the Field, not the Query
+            limitedQuery.fields().include("_id");
+
             // Fetch IDs of documents to delete (to enforce limit safely)
             List<org.bson.Document> docsToDelete = mongoTemplate.find(
-                    limitedQuery.fields().include("_id"),
+                    limitedQuery,
                     org.bson.Document.class,
                     policy.getCollectionName()
             );
